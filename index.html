@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>LackTool</title>
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <!-- Anmeldeseite: Die eigentliche App (app.bin) und die Preisdatei sind verschlüsselt
+       und werden erst mit dem Passwort hier im Browser entschlüsselt. -->
+  <style id="login-style">
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f3f4f6; color: #111827; }
+    .login { min-height: 100vh; display: grid; place-items: center; padding: 16px; box-sizing: border-box; }
+    .login[hidden] { display: none; }
+    .login form { background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.08); padding: 28px 24px; width: 100%; max-width: 340px; box-sizing: border-box; }
+    .login img { width: 56px; height: 56px; border-radius: 12px; display: block; margin: 0 auto 10px; }
+    .login h1 { font-size: 1.3rem; text-align: center; margin: 0 0 18px; }
+    .login input[type=password] { width: 100%; box-sizing: border-box; font-size: 1rem; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; }
+    .login label { display: flex; gap: 8px; align-items: center; font-size: .9rem; margin: 12px 0 16px; color: #4b5563; }
+    .login button { width: 100%; font-size: 1rem; padding: 10px; border: 0; border-radius: 8px; background: #111827; color: #fff; cursor: pointer; }
+    .login button:disabled { opacity: .6; cursor: wait; }
+    .login .fehler { color: #b91c1c; font-size: .9rem; min-height: 1.2em; margin: 10px 0 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="login" id="login" hidden>
+    <form id="login-form">
+      <img src="icons/icon-192.png" alt="">
+      <h1>LackTool</h1>
+      <input type="password" id="pw" placeholder="Passwort" autocomplete="current-password" required autofocus>
+      <label><input type="checkbox" id="merken" checked> Auf diesem Gerät angemeldet bleiben</label>
+      <button id="los">Öffnen</button>
+      <p class="fehler" id="fehler"></p>
+    </form>
+  </div>
+<script>
+(function () {
+  var SALT = '235UBryiM2gK9iSnrFdFGQ==', ITER = 600000, KEY = 'lacktool_zugang_v1';
+  var b64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); };
+  var zuB64 = function (u) { var s = ''; for (var i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s); };
+
+  function merke(roh) { try { if (roh) localStorage.setItem(KEY, zuB64(roh)); else localStorage.removeItem(KEY); } catch (e) {} }
+  function gemerkt() { try { var s = localStorage.getItem(KEY); return s ? b64(s) : null; } catch (e) { return null; } }
+
+  async function schluessel(roh) { return crypto.subtle.importKey('raw', roh, 'AES-GCM', false, ['decrypt']); }
+  async function ausPasswort(pw) {
+    var basis = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: b64(SALT), iterations: ITER }, basis, 256));
+  }
+
+  // Datei (IV + Daten + Prüfwert) entschlüsseln und entpacken → Text
+  async function entschluesseln(k, puffer) {
+    var u = new Uint8Array(puffer);
+    var gz = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.subarray(0, 12) }, k, u.subarray(12));
+    return new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  }
+
+  async function starten(roh) {
+    var k = await schluessel(roh);
+    var res = await fetch('app.bin', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('Seite nicht gefunden (' + res.status + ')');
+    var app = JSON.parse(await entschluesseln(k, await res.arrayBuffer())); // wirft bei falschem Passwort
+    window.LT_KRYPTO = { entschluesseln: function (p) { return entschluesseln(k, p); } };
+    window.LT_VEROEFF = app.veroeff;
+    document.title = app.titel;
+    document.getElementById('login-style').remove();
+    var st = document.createElement('style'); st.textContent = app.css; document.head.appendChild(st);
+    document.body.innerHTML = app.body;
+    app.js.forEach(function (code) { var s = document.createElement('script'); s.textContent = code; document.body.appendChild(s); });
+  }
+
+  var form = document.getElementById('login-form');
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var btn = document.getElementById('los'), fehler = document.getElementById('fehler');
+    btn.disabled = true; fehler.textContent = '';
+    try {
+      var merken = document.getElementById('merken').checked; // vor dem Start lesen, danach ist das Formular weg
+      var roh = await ausPasswort(document.getElementById('pw').value);
+      await starten(roh);
+      merke(merken ? roh : null);
+    } catch (err) {
+      fehler.textContent = err && err.name === 'OperationError' ? 'Passwort falsch.' : 'Fehler: ' + (err && err.message || err);
+      btn.disabled = false;
+    }
+  });
+
+  var roh = gemerkt();
+  (roh ? starten(roh) : Promise.reject()).catch(function (err) {
+    if (!err || err.name === 'OperationError') merke(null); // falscher/alter Schlüssel, nicht bei Netzfehler
+    document.getElementById('login').hidden = false;
+    document.getElementById('pw').focus();
+  });
+})();
+</script>
+</body>
+</html>
