@@ -60,7 +60,7 @@
 
   async function starten(roh) {
     var k = await schluessel(roh);
-    var res = await fetch('app.bin', { cache: 'no-cache' });
+    var res = await fetch('app.bin', { cache: 'no-store' });
     if (!res.ok) throw new Error('Seite nicht gefunden (' + res.status + ')');
     var app = JSON.parse(await entschluesseln(k, await res.arrayBuffer())); // wirft bei falschem Passwort
     window.LT_KRYPTO = { entschluesseln: function (p) { return entschluesseln(k, p); } };
