@@ -1,6 +1,6 @@
 // Service Worker der veröffentlichten Seite: "Netz zuerst", offline aus dem Cache.
 // Alle Inhalte liegen verschlüsselt im Cache (app.bin, preise/webshop.bin).
-const CACHE = 'lacktool-mwhkroij';
+const CACHE = 'lacktool-mwhl7erg';
 const DATEIEN = ['./', 'index.html', 'app.bin', 'preise/webshop.bin', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon-32.png', 'icons/apple-touch-icon.png'];
 
